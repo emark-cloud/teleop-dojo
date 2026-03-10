@@ -1,281 +1,154 @@
-# Teleop Dojo — Core Game Spec
+# Teleop Dojo
 
-## 1. Design Principles
+A browser-based robotic arm teleoperation training game built for [PrismaX](https://prismax.ai) — a decentralized platform connecting teleoperators with physical robots to collect AI training data.
 
-* Skill > speed
-* Judgment > raw success
-* Deterministic simulation
-* Post-round evaluation only
+Teleop Dojo simulates the teleoperation experience, training players on precision, judgment, and smoothness using a virtual SO-100 / Koch v1.1 desktop robot arm (5-DOF + gripper).
 
----
+## Getting Started
 
-## 2. Arm Model (Visual + Functional)
+```bash
+npm install
+npm run dev       # Start dev server (http://localhost:5173)
+npm run build     # Production build to dist/
+```
 
-* Matte graphite material
-* No glow, no branding
-* Clear joint segmentation
-* Dominant wrist + gripper
-* State communicated only through motion
+## Tech Stack
 
----
+- **TypeScript + Vite** — build and dev tooling
+- **Three.js** — 3D rendering
+- **Rapier3D** (`@dimforge/rapier3d-compat`) — deterministic WASM physics engine
+- **HTML/CSS overlays** — HUD and UI elements
 
-## 3. Physics (Deterministic)
+## Controls
 
-### Global
+| Key     | Action              |
+| ------- | ------------------- |
+| Up / Down   | Elbow up / down         |
+| A / D   | Shoulder rotation   |
+| Left / Right | Wrist roll          |
+| W / S   | Wrist pitch         |
+| Q / E   | Z-axis lift up / down |
+| C / V   | Base slide          |
+| Z / X   | Grip open / close   |
 
-* Fixed timestep
-* Earth gravity
-* No randomness
+Mouse controls the orbit camera.
 
-### Arm
+## Game Flow
 
-* Rigid links
-* Acceleration limits
-* No flex
+1. An object spawns on the table
+2. Position the arm above the object (ALIGN)
+3. Descend into the commit zone (COMMIT_ZONE)
+4. Open gripper, close to grasp (GRASP_ATTEMPT)
+5. Lift and hold steady (LIFT → HOLD)
+6. Round ends with SUCCESS or FAIL → score summary
 
-### Grip
+State machine: `IDLE → SPAWN → ALIGN → COMMIT_ZONE → GRASP_ATTEMPT → LIFT → HOLD → SUCCESS/FAIL → SUMMARY`
 
-* Binary (open/closed)
-* Success requires alignment + angular tolerance
+## Scoring
 
-### Object Schema
+All scoring is computed **post-round** — no real-time score display during play.
 
-Each object defines:
+| Component    | Weight | Description                                      |
+| ------------ | ------ | ------------------------------------------------ |
+| Alignment    | 35%    | Lateral error (60%) + angular error (40%)        |
+| Judgment     | 25%    | Commit zone corrections + abort timing penalties |
+| Smoothness   | 20%    | Joint velocity variance (lower = better)         |
+| Stability    | 20%    | Angular velocity in first 500ms post-lift        |
 
-* id
-* mass
-* friction
-* height
-* grasp_axis
-* alignment_tolerance
-* angular_tolerance
-* stability_tolerance
-* optional COM offset
+Scoring is fully deterministic — identical inputs produce identical scores.
 
----
+## Objects
 
-## 4. Controls (Final Mapping)
+8 graspable objects with varying difficulty:
 
-| Input | Action                                    |
-| ----- | ----------------------------------------- |
-| ↑ / ↓ | Elbow joint up / down                     |
-| A / D | Shoulder rotation left / right            |
-| ← / → | Wrist rotation anti-clockwise / clockwise |
-| W / S | Wrist Y-axis forward / backward           |
-| Q / E | Shoulder Z-axis lift up / down            |
-| C / V | Base slide left / right                   |
-| Z / X | Grip open / close                         |
+| Object  | Challenge                |
+| ------- | ------------------------ |
+| Box     | Forgiving / tutorial     |
+| Mug     | Asymmetric grasp         |
+| Bottle  | Stability challenge      |
+| Banana  | Alignment challenge      |
+| Can     | Cylindrical grasp        |
+| Block   | Compact / precise        |
+| Puck    | Low-profile target       |
+| Pen     | Narrow / high difficulty |
 
-Z-axis (Q/E) is the primary commit axis.
+All objects use procedural geometry (Three.js primitives with Rapier colliders).
 
----
-
-## 5. Canonical Pickup Reference
-
-1. W → align above object
-2. E → descend
-3. Z → open
-4. X → close
-5. Q → lift
-
-Used as reference for judgment scoring.
-
----
-
-## 6. Game State Machine
-
-States:
-IDLE → SPAWN → ALIGN → COMMIT_ZONE → GRASP_ATTEMPT → LIFT → HOLD → SUCCESS/FAIL → SUMMARY
-
-Transitions are deterministic and event-driven.
-
----
-
-## 7. Commit Zone Math
-
-commit_height = object_top_z + (object.height * 0.5)
-
-Inside commit zone when:
-end_effector_z <= commit_height
-
-Below object top when:
-end_effector_z <= object_top_z
-
-Abort = re-ascending above commit_height without successful grip.
-# Teleop Dojo — Scoring & Math Spec
-
-All scoring is computed post-round.
-
----
-
-## 1. Alignment Score
-
-lateral_error = distance(gripper_center, object_center_xy)
-angular_error = angle(wrist_axis, object.grasp_axis)
-
-alignment_score = 1 - clamp(
-(lateral_error / alignment_tolerance) * 0.6 +
-(angular_error / angular_tolerance) * 0.4,
-0, 1
-)
-
----
-
-## 2. Judgment Score
-
-Track:
-
-* Corrections inside commit zone
-* Abort timing
-
-judgment_score = 1 - clamp(
-(zone_corrections * 0.1) + late_abort_penalty,
-0, 1
-)
-
-Early abort improves score.
-Late abort penalized.
-
----
-
-## 3. Smoothness Score
-
-smoothness = 1 - normalize(variance(joint_velocity))
-
-Lower variance = higher score.
-
----
-
-## 4. Stability Score
-
-Measured during first 500ms after lift.
-
-stability = 1 - clamp(
-angular_velocity / stability_tolerance,
-0, 1
-)
-
----
-
-## 5. Overall Score
-
-overall =
-alignment * 0.35 +
-judgment * 0.25 +
-smoothness * 0.2 +
-stability * 0.2
-
----
-
-## 6. Determinism Rule
-
-Given identical key inputs, identical scores must result.
-# Teleop Dojo — UI & Visual System Spec
-
-## 1. Visual Principles
-
-* Dark bronze / espresso UI
-* Warm gold highlights
-* Subtle grain texture
-* No flashing, no arcade effects
-* Calm, instrument-panel feel
-
----
-
-## 2. In-Session UI
-
-### Commit Zone Arc
-
-* Segmented circular arc around gripper shadow
-* Intensifies inside commit zone
-* No numbers shown
-
-### Stability Ring
-
-* Appears after lift
-* Fractures if instability detected
-
-### Control Feedback
-
-* Subtle motion smears
-* No text popups
-
----
-
-## 3. Post-Round Summary
-
-* Segmented circular breakdown
-* Alignment, Judgment, Smoothness, Stability
-* Numbers secondary to visual arcs
-
----
-
-## 4. Explicit Non-Goals
-
-* No bright colors
-* No glow effects
-* No success banners
-* No sound-based rewards (v1)
-# Teleop Dojo — Dev & Architecture Spec
-
-## 1. Recommended Stack
-
-* TypeScript
-* Three.js (rendering)
-* Rapier (physics)
-* Vite (build)
-
----
-
-## 2. Folder Structure
+## Architecture
 
 ```
 src/
- ├─ simulator/
- ├─ controls/
- ├─ game/
- ├─ scoring/
- ├─ ui/
- ├─ objects/
- └─ config/
+  main.ts                  # Entry point: init WASM, scene, game loop
+  simulator/
+    scene.ts               # Three.js renderer, lighting, environment
+    camera.ts              # PerspectiveCamera + OrbitControls
+    physics.ts             # Rapier world, fixed timestep (1/60s)
+    arm.ts                 # SO-100 arm: links, joints, visual model
+    gripper.ts             # Gripper fingers, grip detection, attach/detach
+  controls/
+    keyboard.ts            # Key state tracking (keydown/keyup)
+    joint-controller.ts    # Map keys → joint motor targets
+  game/
+    state-machine.ts       # Game state machine with transition logic
+    round-manager.ts       # Round lifecycle, telemetry collection
+    commit-zone.ts         # Commit height calculation, zone tracking
+  scoring/
+    scorer.ts              # Post-round score computation
+    telemetry.ts           # Per-frame state recorder
+    storage.ts             # Save run results to localStorage + JSON export
+  ui/
+    hud.ts                 # Key indicators panel
+    summary.ts             # Post-round score breakdown screen
+    styles.css             # Dark bronze/espresso theme, grain texture
+  objects/
+    object-schema.ts       # GraspObject interface
+    object-defs.ts         # 8 object definitions
+    object-loader.ts       # Procedural geometry + Rapier collider creation
+  config/
+    constants.ts           # Physics params, scoring weights, tolerances
 ```
 
----
+## Data Storage
 
-## 3. Data Storage (Option A)
+Run results are saved to `localStorage` as JSON:
 
-Per-run JSON:
-
+```json
 {
-run_id,
-object_id,
-scores,
-outcome,
-duration_ms,
-timestamp
+  "run_id": "...",
+  "object_id": "box",
+  "scores": { "alignment": 0.82, "judgment": 0.91, "smoothness": 0.74, "stability": 0.88, "overall": 0.84 },
+  "outcome": "success",
+  "duration_ms": 12340,
+  "timestamp": 1710000000000
 }
+```
 
-Stored locally in `/data`.
+A `downloadRunsJSON()` utility is available for exporting all stored runs.
 
----
+## Design Principles
 
-## 4. Milestones
+- **Deterministic physics** — fixed timestep, no randomness, reproducible results
+- **Skill over speed** — scoring rewards precision and judgment
+- **Post-round evaluation only** — no distracting in-game scores
+- **Calm aesthetic** — dark bronze/espresso palette (#1a1410), gold accent (#c9a84c), subtle grain texture, no glow or arcade effects
+- **No sound** (v1)
 
-Phase 1: Arm + Controls
-Phase 2: Commit detection
-Phase 3: Scoring engine
-Phase 4: UI overlays
-Phase 5: 4 objects tuning
+## Current Status
 
----
+**Functionally playable.** Core mechanics are complete:
 
-## 5. Definition of Complete v1
+- Arm model with all 5 DOF + gripper, physics-driven
+- Full keyboard control mapping
+- 8 objects with spawn, grasp, and lift physics
+- Complete state machine flow
+- Deterministic scoring engine
+- Telemetry recording and localStorage persistence
+- Key indicator HUD
 
-* All controls functional
-* 4 objects implemented
-* Deterministic scoring
-* JSON output per run
-* Summary UI working
+**Not yet wired up:**
 
-When these are met, v1 is complete.
-
+- Summary screen (class exists but not displayed after rounds)
+- Commit zone arc visualization (CSS placeholder only)
+- Stability ring visualization
+- Data export UI button
+- Game state indicator in HUD
