@@ -83,6 +83,8 @@ function isArmBelowTable(arm: RobotArm): boolean {
 }
 
 export function updateJoints(arm: RobotArm, dt: number, world: RAPIER.World): number[] {
+  const SHOULDER_YAW_SPEED_SCALE = 0.4; // A/D rotation is slower for precision
+
   const mappings: JointMapping[] = [
     {
       positiveKey: 'KeyD',
@@ -126,9 +128,10 @@ export function updateJoints(arm: RobotArm, dt: number, world: RAPIER.World): nu
     const positive = isKeyDown(m.positiveKey);
     const negative = isKeyDown(m.negativeKey);
 
+    const maxVel = i === 0 ? JOINT_MAX_VELOCITY * SHOULDER_YAW_SPEED_SCALE : JOINT_MAX_VELOCITY;
     let desiredVel = 0;
-    if (positive && !negative) desiredVel = JOINT_MAX_VELOCITY;
-    else if (negative && !positive) desiredVel = -JOINT_MAX_VELOCITY;
+    if (positive && !negative) desiredVel = maxVel;
+    else if (negative && !positive) desiredVel = -maxVel;
 
     // Smooth velocity: accelerate toward desired, friction-decelerate when idle
     const accel = desiredVel !== 0 ? JOINT_ACCEL : JOINT_FRICTION_DECEL;
@@ -145,27 +148,27 @@ export function updateJoints(arm: RobotArm, dt: number, world: RAPIER.World): nu
     velocities.push(currentVelocities[i]);
   }
 
-  // Apply rotations to FK pivots
+  // Save previous yaw for table collision revert
+  const prevYaw = arm.pivots.shoulderYaw.rotation.y;
+
+  // Apply all rotations to FK pivots
   arm.pivots.shoulderYaw.rotation.y = targetAngles[0];
-  arm.pivots.shoulderPitch.rotation.x = prevPitch[0];
-  arm.pivots.elbow.rotation.x = prevPitch[1];
-  arm.pivots.wristPitch.rotation.x = prevPitch[2];
-  arm.pivots.wristRoll.rotation.y = targetAngles[4];
-
-  // Table collision check: only block if arm was above table and would go below
-  const wasBelow = isArmBelowTable(arm);
-
   arm.pivots.shoulderPitch.rotation.x = targetAngles[1];
   arm.pivots.elbow.rotation.x = targetAngles[2];
   arm.pivots.wristPitch.rotation.x = targetAngles[3];
+  arm.pivots.wristRoll.rotation.y = targetAngles[4];
 
-  if (!wasBelow && isArmBelowTable(arm)) {
+  // Check table collision — revert all joint changes if arm goes below table
+  if (isArmBelowTable(arm)) {
+    targetAngles[0] = prevYaw;
     targetAngles[1] = prevPitch[0];
     targetAngles[2] = prevPitch[1];
     targetAngles[3] = prevPitch[2];
+    currentVelocities[0] = 0;
     currentVelocities[1] = 0;
     currentVelocities[2] = 0;
     currentVelocities[3] = 0;
+    arm.pivots.shoulderYaw.rotation.y = targetAngles[0];
     arm.pivots.shoulderPitch.rotation.x = targetAngles[1];
     arm.pivots.elbow.rotation.x = targetAngles[2];
     arm.pivots.wristPitch.rotation.x = targetAngles[3];
