@@ -148,6 +148,9 @@ export function updateJoints(arm: RobotArm, dt: number, world: RAPIER.World): nu
     velocities.push(currentVelocities[i]);
   }
 
+  // Check if arm is already below table BEFORE applying new angles
+  const wasBelowBefore = isArmBelowTable(arm);
+
   // Save previous yaw for table collision revert
   const prevYaw = arm.pivots.shoulderYaw.rotation.y;
 
@@ -158,8 +161,8 @@ export function updateJoints(arm: RobotArm, dt: number, world: RAPIER.World): nu
   arm.pivots.wristPitch.rotation.x = targetAngles[3];
   arm.pivots.wristRoll.rotation.y = targetAngles[4];
 
-  // Check table collision — revert all joint changes if arm goes below table
-  if (isArmBelowTable(arm)) {
+  // Only block the transition from above to below table — if already below, allow movement to escape
+  if (!wasBelowBefore && isArmBelowTable(arm)) {
     targetAngles[0] = prevYaw;
     targetAngles[1] = prevPitch[0];
     targetAngles[2] = prevPitch[1];
